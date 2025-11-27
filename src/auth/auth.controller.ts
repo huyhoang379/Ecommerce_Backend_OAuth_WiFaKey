@@ -46,14 +46,20 @@ export class AuthController {
       const tokens = await this.authService.exchangeCodeForTokens(body.code);
 
       // Fetch user profile
-      // const profile = await this.authService.fetchUserProfile(tokens.access_token);
+
+      const profile = await this.authService.fetchUserProfile(
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+        tokens.access_token,
+      );
 
       // Sync user to database
-      // await this.authService.syncUserInfo({
-      //   idpUserId: profile.sub,
-      //   email: profile.email,
-      //   name: profile.name,
-      // });
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const user = await this.authService.syncUserInfo({
+        idpUserId: profile.user_id, // ✅ userId từ IdP
+        // email: profile.email,
+        name: profile.name,
+        picture: profile.picture,
+      });
 
       return {
         success: true,
@@ -65,11 +71,14 @@ export class AuthController {
         tokenType: tokens.token_type || 'Bearer',
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         expiresIn: tokens.expires_in,
-        // userInfo: {
-        //   userId: profile.sub,
-        //   email: profile.email,
-        //   name: profile.name,
-        // },
+        userInfo: {
+          userId: profile.user_id, // ✅ IdP userId (id từ Spring Boot)
+          localUserId: user.id, // ✅ NestJS database userId
+          // email: profile.email,
+          name: profile.name,
+          username: profile.sub,
+          picture: profile.picture,
+        },
       };
     } catch (error) {
       this.logger.error('Failed to exchange code:', error);
@@ -121,7 +130,7 @@ export class AuthController {
    * Protected by JWT - verify IdP token
    */
   @Get('profile')
-  @UseGuards(AuthGuard('jwt'))
+  // @UseGuards(AuthGuard('jwt'))
   async getProfile(@Req() req: Request) {
     const jwtUser = req.user as { userId: string; email: string; name: string };
 

@@ -7,7 +7,7 @@ import { User } from './entities/user.entity';
 
 interface UserInfo {
   idpUserId: string;
-  email: string;
+  email?: string;
   name?: string;
   picture?: string;
 }
@@ -21,7 +21,7 @@ export class AuthService {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-call
     @InjectRepository(User)
     private userRepository: Repository<User>,
-  ) { }
+  ) {}
 
   /**
    * Sync user info từ IdP vào database
@@ -46,7 +46,7 @@ export class AuthService {
     } else {
       this.logger.log(`Updating existing user: ${userData.email}`);
       // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-      user.email = userData.email;
+      // user.email = userData.email;
       if (typeof userData.name !== 'undefined') {
         // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
         user.name = userData.name;
@@ -157,10 +157,12 @@ export class AuthService {
   }
 
   async exchangeCodeForTokens(code: string) {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     const oauthConfig = this.configService.get('oauth');
 
     this.logger.log('Calling IdP token endpoint...');
 
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
     const response = await fetch(oauthConfig.tokenURL, {
       method: 'POST',
       headers: {
@@ -169,8 +171,11 @@ export class AuthService {
       body: new URLSearchParams({
         grant_type: 'authorization_code',
         code: code,
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
         client_id: oauthConfig.clientId,
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
         client_secret: oauthConfig.clientSecret, // ✅ Secure in backend
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
         redirect_uri: oauthConfig.callbackURL,
       }),
     });
@@ -181,32 +186,74 @@ export class AuthService {
       throw new Error('Failed to exchange code for tokens');
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     const data = await response.json();
     this.logger.log('Successfully got tokens from IdP');
 
     return {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
       access_token: data.access_token,
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
       refresh_token: data.refresh_token,
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
       expires_in: data.expires_in || 3600,
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
       token_type: data.token_type || 'Bearer',
     };
   }
 
-  async fetchUserProfile(accessToken: string) {
-    const userInfoUrl = this.configService.get('oauth.userInfoURL');
+  async fetchUserProfile(accessToken: string): Promise<{
+    sub: string;
+    user_id: string;
+    name: string;
+    // email: string;
+    picture?: string;
+  }> {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const oauthConfig = this.configService.get('oauth');
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+    const userInfoUrl = oauthConfig.userInfoURL;
+
+    if (!userInfoUrl) {
+      throw new Error('UserInfo URL not configured');
+    }
 
     this.logger.log('Fetching user profile from IdP...');
 
-    const response = await fetch(userInfoUrl, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    });
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+      const response = await fetch(userInfoUrl, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
 
-    if (!response.ok) {
-      throw new Error('Failed to fetch user profile');
+      if (!response.ok) {
+        const error = await response.text();
+        this.logger.error(`Failed to fetch user profile: ${error}`);
+        throw new Error('Failed to fetch user profile from IdP');
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+      const profile = await response.json();
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      this.logger.log(`User profile fetched: ${profile.username}`);
+
+      return {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+        sub: profile.sub, // ✅ userId từ IdP
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+        user_id: profile.user_id,
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+        name: profile.name,
+
+        // email: profile.email,
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+        picture: profile.picture,
+      };
+    } catch (error) {
+      this.logger.error('Fetch user profile error:', error);
+      throw error;
     }
-
-    return await response.json();
   }
 }

@@ -1,18 +1,20 @@
 // src/auth/strategies/jwt.strategy.ts
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, Logger } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { passportJwtSecret } from 'jwks-rsa';
 import { ConfigService } from '@nestjs/config';
 
 export interface JwtPayload {
-  sub: string;
-  email: string;
+  sub: string; // Username (có thể thay đổi)
+  user_id: string; // ✅ STABLE ID từ IdP - dùng làm primary identifier
+  email?: string;
   name?: string;
   preferred_username?: string;
   iat: number;
   exp: number;
   scope?: string;
+  client_id?: string;
   realm_access?: {
     roles: string[];
   };
@@ -20,6 +22,8 @@ export interface JwtPayload {
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
+  private readonly logger = new Logger(JwtStrategy.name);
+
   constructor(private configService: ConfigService) {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     const oauthConfig = configService.get('oauth');
@@ -40,7 +44,8 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
 
       ignoreExpiration: false,
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-      audience: oauthConfig.clientId,
+      // Thêm aud nếu cần
+      // audience: oauthConfig.clientId
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
       issuer: oauthConfig.issuer,
       algorithms: ['RS256'],
@@ -48,24 +53,40 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
   }
 
   /**
-   * Validate JWT payload
-   * KHÔNG query database
-   * Token validity được đảm bảo bởi signature verification
+   * ✅ Validate JWT payload
+   * Token đã được verify bằng public key từ JWKS
+   * Không cần query database - stateless authentication
    */
   validate(payload: JwtPayload) {
-    if (!payload.sub || !payload.email) {
-      throw new UnauthorizedException('Invalid token payload');
+    // ✅ CRITICAL: Validate user_id (stable identifier)
+    if (!payload.user_id) {
+      throw new UnauthorizedException('Invalid token payload: missing user_id');
     }
 
-    // Extract roles nếu có
+    // Validate sub (username) - optional warning
+    if (!payload.sub) {
+      this.logger.warn('Token missing sub (username) claim');
+    }
+
+    // Validate token expiration (double check)
+    if (payload.exp && Date.now() >= payload.exp * 1000) {
+      throw new UnauthorizedException('Token expired');
+    }
+
+    // Extract roles
     const roles = payload.realm_access?.roles || [];
 
-    // Return data này sẽ được gán vào req.user
+    // ✅ CRITICAL FIX: Dùng user_id làm idpUserId (stable identifier)
     return {
-      userId: payload.sub,
+      idpUserId: payload.user_id, // ✅ Stable ID từ IdP
+      username: payload.sub, // ✅ Username (có thể thay đổi)
       email: payload.email,
       name: payload.name || payload.preferred_username,
       roles: roles,
+      scope: payload.scope,
+
+      // Optional: Include raw payload for debugging
+      _raw: payload,
     };
   }
 }
