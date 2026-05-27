@@ -37,6 +37,7 @@ export default () => {
       authorizationURL: process.env.OAUTH_AUTHORIZATION_URL!,
       tokenURL: process.env.OAUTH_TOKEN_URL!,
       userInfoURL: process.env.OAUTH_USERINFO_URL!,
+      revokeRefreshURL: process.env.OAUTH_REVOKE_REFRESH!,
       jwksUri: process.env.OAUTH_JWKS_URI!,
       clientId: process.env.OAUTH_CLIENT_ID!,
       clientSecret: process.env.OAUTH_CLIENT_SECRET!,

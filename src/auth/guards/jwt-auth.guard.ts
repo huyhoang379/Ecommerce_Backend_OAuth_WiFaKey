@@ -12,13 +12,7 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
   private readonly logger = new Logger(JwtAuthGuard.name);
 
   canActivate(context: ExecutionContext) {
-    console.log('=== JWT GUARD ACTIVATED ===');
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-    const request = context.switchToHttp().getRequest();
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-    console.log('Authorization header:', request.headers.authorization);
-
-    return super.canActivate(context);
+    return super.canActivate(context); // chỉ verify token
   }
 
   handleRequest(err, user, info) {

@@ -33,66 +33,43 @@ export class UsersController {
    */
   @Get('me')
   async getCurrentUser(@CurrentUser() user: CurrentUserPayload) {
-    this.logger.log(`Getting user info for idpUserId: ${user.idpUserId}`);
+    try {
+      this.logger.log(`Getting user info for idpUserId: ${user.idpUserId}`);
 
-    // ✅ Lấy user từ database bằng idpUserId
-    const userInfo = await this.authService.getUserByIdpUserId(user.idpUserId);
-
-    // Case 1: User chưa được sync vào database (first login)
-    if (!userInfo) {
-      this.logger.warn(
-        `User ${user.idpUserId} not found in database - need to sync first`,
+      const userInfo = await this.authService.getUserByIdpUserId(
+        user.idpUserId,
       );
 
-      // Option A: Auto-sync user info (recommended)
-      if (user.email) {
-        const syncedUser = await this.authService.syncUserInfo({
-          idpUserId: user.idpUserId,
-          email: user.email,
-          name: user.name,
-        });
+      this.logger.log(`Query result: ${userInfo ? 'FOUND' : 'NOT FOUND'}`);
 
-        this.logger.log(`User ${user.idpUserId} auto-synced to database`);
-
-        return {
-          success: true,
-          data: {
-            id: syncedUser.id,
-            idpUserId: syncedUser.idpUserId,
-            email: syncedUser.email,
-            name: syncedUser.name,
-            picture: syncedUser.picture,
-            preferences: syncedUser.preferences,
-            createdAt: syncedUser.createdAt,
-            lastLoginAt: syncedUser.lastLoginAt,
-          },
-        };
+      if (userInfo) {
+        this.logger.log(`User data: ${JSON.stringify(userInfo)}`);
       }
 
-      // Option B: Return error (nếu không muốn auto-sync)
-      throw new NotFoundException(
-        'User not found in database. Please complete registration.',
+      if (!userInfo) {
+        throw new NotFoundException('User not found');
+      }
+
+      const response = {
+        success: true,
+        data: {
+          id: userInfo.id,
+          idpUserId: userInfo.idpUserId,
+          email: userInfo.email,
+        },
+      };
+
+      this.logger.log(`Sending response: ${JSON.stringify(response)}`);
+      return response;
+    } catch (error) {
+      this.logger.error(
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+        `Error in getCurrentUser: ${error.message}`,
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+        error.stack,
       );
+      throw error;
     }
-
-    // Case 2: User đã tồn tại trong database
-    return {
-      success: true,
-      data: {
-        id: userInfo.id,
-        idpUserId: userInfo.idpUserId,
-        email: userInfo.email,
-        name: userInfo.name,
-        picture: userInfo.picture,
-        preferences: userInfo.preferences,
-        createdAt: userInfo.createdAt,
-        lastLoginAt: userInfo.lastLoginAt,
-        lastLogoutAt: userInfo.lastLogoutAt,
-
-        // Include info từ token (roles, scope)
-        roles: user.roles,
-      },
-    };
   }
 
   /**

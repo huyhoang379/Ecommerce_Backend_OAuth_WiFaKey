@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from './entities/user.entity';
+import { IdpErrorException } from 'src/common/exceptions/idp-error.exception';
 
 interface UserInfo {
   idpUserId: string;
@@ -108,11 +109,103 @@ export class AuthService {
   }
 
   /**
+   * Request revoke refresh token to IdP
+   * KHÔNG cần access token, chỉ cần client credentials
+   */
+  async requestRevokeRefreshTokenToIdp(refreshToken: string) {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const oauthConfig = this.configService.get('oauth');
+
+    this.logger.log('Calling IdP revoke endpoint...');
+
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
+      const response = await fetch(oauthConfig.revokeRefreshURL, {
+        method: 'POST',
+        headers: {
+          // ❌ BỎ Authorization header
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          token: refreshToken,
+          token_type_hint: 'refresh_token',
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+          client_id: oauthConfig.clientId,
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+          client_secret: oauthConfig.clientSecret,
+        }),
+      });
+
+      if (!response.ok) {
+        let errorData;
+        const contentType = response.headers.get('content-type');
+
+        if (contentType?.includes('application/json')) {
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          errorData = await response.json();
+        } else {
+          const errorText = await response.text();
+          errorData = {
+            error: 'unknown_error',
+            error_description: errorText,
+          };
+        }
+
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+        const errorCode = errorData.error || 'revoke_refresh_failed';
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const errorDescription =
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+          errorData.error_description || 'Failed to revoke refresh token';
+
+        this.logger.error(
+          `IdP revoke refresh error [${response.status}]: ${errorCode} - ${errorDescription}`,
+        );
+
+        throw new IdpErrorException(
+          errorCode,
+          errorDescription,
+          response.status,
+        );
+      }
+
+      // Response có thể là empty body (theo OAuth 2.0 spec)
+      let data = {};
+      const contentType = response.headers.get('content-type');
+
+      if (contentType?.includes('application/json')) {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unused-vars
+        data = await response.json();
+      }
+
+      this.logger.log('Successfully revoked refresh token from IdP');
+
+      return {
+        status: true,
+        message: 'Revoke refresh token thành công!',
+      };
+    } catch (error) {
+      if (error instanceof IdpErrorException) {
+        throw error;
+      }
+
+      this.logger.error('Network error revoking refresh token:', error);
+      throw new IdpErrorException(
+        'network_error',
+        'Unable to connect to authentication provider',
+        503,
+      );
+    }
+  }
+
+  /**
    * Proxy refresh token request to IdP
    */
   async refreshTokenFromIdp(refreshToken: string) {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     const oauthConfig = this.configService.get('oauth');
+
+    this.logger.log('Calling IdP token endpoint for refresh...');
 
     try {
       // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
@@ -132,128 +225,228 @@ export class AuthService {
       });
 
       if (!response.ok) {
-        const error = await response.text();
-        this.logger.error(`Failed to refresh token: ${error}`);
-        throw new Error('Failed to refresh token from IdP');
+        // Parse error response from IdP
+        let errorData;
+        const contentType = response.headers.get('content-type');
+
+        if (contentType?.includes('application/json')) {
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          errorData = await response.json();
+        } else {
+          const errorText = await response.text();
+          errorData = { error: 'unknown_error', error_description: errorText };
+        }
+
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+        const errorCode = errorData.error || 'refresh_failed';
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const errorDescription =
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+          errorData.error_description || 'Failed to refresh access token';
+
+        this.logger.error(
+          `IdP refresh error [${response.status}]: ${errorCode} - ${errorDescription}`,
+        );
+
+        // Throw custom exception với thông tin từ IdP
+        throw new IdpErrorException(
+          errorCode,
+          errorDescription,
+          response.status,
+        );
       }
 
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       const data = await response.json();
+      this.logger.log('Successfully refreshed tokens from IdP');
 
       return {
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
         access_token: data.access_token,
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-        refresh_token: data.refresh_token || refreshToken,
+        refresh_token: data.refresh_token || refreshToken, // Keep old if not rotated
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-        expires_in: data.expires_in,
+        expires_in: data.expires_in || 3600,
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
         token_type: data.token_type || 'Bearer',
       };
     } catch (error) {
-      this.logger.error('Refresh token error:', error);
-      throw error;
+      // Re-throw IdP errors
+      if (error instanceof IdpErrorException) {
+        throw error;
+      }
+
+      // Handle network/fetch errors
+      this.logger.error('Network error refreshing token:', error);
+      throw new IdpErrorException(
+        'network_error',
+        'Unable to connect to authentication provider',
+        503,
+      );
     }
   }
 
-  async exchangeCodeForTokens(code: string) {
+  async exchangeCodeForTokens(
+    code: string,
+    state: string,
+    code_verifier: string,
+  ) {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     const oauthConfig = this.configService.get('oauth');
 
     this.logger.log('Calling IdP token endpoint...');
 
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
-    const response = await fetch(oauthConfig.tokenURL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: new URLSearchParams({
-        grant_type: 'authorization_code',
-        code: code,
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-        client_id: oauthConfig.clientId,
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-        client_secret: oauthConfig.clientSecret, // ✅ Secure in backend
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-        redirect_uri: oauthConfig.callbackURL,
-      }),
-    });
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
+      const response = await fetch(oauthConfig.tokenURL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          grant_type: 'authorization_code',
+          code: code,
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+          client_id: oauthConfig.clientId,
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+          client_secret: oauthConfig.clientSecret,
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+          redirect_uri: oauthConfig.callbackURL,
+          state: state,
+          code_verifier: code_verifier,
+        }),
+      });
 
-    if (!response.ok) {
-      const error = await response.text();
-      this.logger.error(`IdP token error: ${error}`);
-      throw new Error('Failed to exchange code for tokens');
+      if (!response.ok) {
+        // Parse error response from IdP
+        let errorData;
+        const contentType = response.headers.get('content-type');
+
+        if (contentType?.includes('application/json')) {
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          errorData = await response.json();
+        } else {
+          const errorText = await response.text();
+          errorData = { error: 'unknown_error', error_description: errorText };
+        }
+
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+        const errorCode = errorData.error || 'token_exchange_failed';
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const errorDescription =
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+          errorData.error_description || 'Failed to exchange code for tokens';
+
+        this.logger.error(
+          `IdP token error [${response.status}]: ${errorCode} - ${errorDescription}`,
+        );
+
+        // Throw custom exception với thông tin từ IdP
+        throw new IdpErrorException(
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+          errorCode,
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+          errorDescription,
+          response.status,
+        );
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+      const data = await response.json();
+      this.logger.log('Successfully got tokens from IdP');
+
+      return {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+        access_token: data.access_token,
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+        refresh_token: data.refresh_token,
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+        expires_in: data.expires_in || 3600,
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+        token_type: data.token_type || 'Bearer',
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+        id_token: data.id_token,
+      };
+    } catch (error) {
+      // Re-throw IdP errors
+      if (error instanceof IdpErrorException) {
+        throw error;
+      }
+
+      // Handle network/fetch errors
+      this.logger.error('Network error calling IdP:', error);
+      throw new IdpErrorException(
+        'network_error',
+        'Unable to connect to authentication provider',
+        503,
+      );
     }
-
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-    const data = await response.json();
-    this.logger.log('Successfully got tokens from IdP');
-
-    return {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-      access_token: data.access_token,
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-      refresh_token: data.refresh_token,
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-      expires_in: data.expires_in || 3600,
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-      token_type: data.token_type || 'Bearer',
-    };
   }
 
-  async fetchUserProfile(accessToken: string): Promise<{
-    sub: string;
-    user_id: string;
-    name: string;
-    // email: string;
-    picture?: string;
-  }> {
+  async fetchUserProfile(accessToken: string) {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     const oauthConfig = this.configService.get('oauth');
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-    const userInfoUrl = oauthConfig.userInfoURL;
-
-    if (!userInfoUrl) {
-      throw new Error('UserInfo URL not configured');
-    }
 
     this.logger.log('Fetching user profile from IdP...');
 
     try {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-      const response = await fetch(userInfoUrl, {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
+      const response = await fetch(oauthConfig.userInfoURL, {
+        method: 'GET',
         headers: {
           Authorization: `Bearer ${accessToken}`,
         },
       });
 
       if (!response.ok) {
-        const error = await response.text();
-        this.logger.error(`Failed to fetch user profile: ${error}`);
-        throw new Error('Failed to fetch user profile from IdP');
+        let errorData;
+        const contentType = response.headers.get('content-type');
+
+        if (contentType?.includes('application/json')) {
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          errorData = await response.json();
+        } else {
+          const errorText = await response.text();
+          errorData = { error: 'unknown_error', error_description: errorText };
+        }
+
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+        const errorCode = errorData.error || 'userinfo_failed';
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const errorDescription =
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+          errorData.error_description || 'Failed to fetch user profile';
+
+        this.logger.error(
+          `IdP userinfo error [${response.status}]: ${errorCode} - ${errorDescription}`,
+        );
+
+        throw new IdpErrorException(
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+          errorCode,
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+          errorDescription,
+          response.status,
+        );
       }
 
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       const profile = await response.json();
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-      this.logger.log(`User profile fetched: ${profile.username}`);
+      this.logger.log('Successfully fetched user profile');
 
-      return {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-        sub: profile.sub, // ✅ userId từ IdP
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-        user_id: profile.user_id,
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-        name: profile.name,
-
-        // email: profile.email,
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-        picture: profile.picture,
-      };
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-return
+      return profile;
     } catch (error) {
-      this.logger.error('Fetch user profile error:', error);
-      throw error;
+      if (error instanceof IdpErrorException) {
+        throw error;
+      }
+
+      this.logger.error('Network error fetching user profile:', error);
+      throw new IdpErrorException(
+        'network_error',
+        'Unable to fetch user profile from authentication provider',
+        503,
+      );
     }
   }
 }
