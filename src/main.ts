@@ -9,16 +9,26 @@ async function bootstrap() {
   const configService = app.get(ConfigService);
   const logger = new Logger('Bootstrap');
 
-  // CORS
+  // ⭐ QUAN TRỌNG: Chỉ list origin 1 LẦN, không duplicate
+  const allowedOrigins = [
+    'https://ecommerce-frontend-demo-wi-fa-key.vercel.app',
+    'http://localhost:3001',
+  ];
+
+  // ⭐ Dùng string thay vì function để tránh duplicate
   app.enableCors({
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-    origin: configService.get('frontend_url'),
-    credentials: true,
+    origin: allowedOrigins, // Đơn giản hơn, không dùng callback
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'ngrok-skip-browser-warning',
+    ],
+    credentials: false,
+    preflightContinue: false,
+    optionsSuccessStatus: 204,
   });
 
-  // Global validation pipe
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
@@ -27,14 +37,12 @@ async function bootstrap() {
     }),
   );
 
-  // Global prefix
   app.setGlobalPrefix('api');
 
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-  const port = configService.get('port');
+  const port = configService.get('port') || 8000;
   await app.listen(port);
 
-  logger.log(`Application is running on: http://localhost:${port}`);
-  logger.log(`Frontend URL: ${configService.get('frontend_url')}`);
+  logger.log(`✅ Application running on: http://localhost:${port}`);
+  logger.log(`✅ CORS enabled for: ${allowedOrigins.join(', ')}`);
 }
 bootstrap();

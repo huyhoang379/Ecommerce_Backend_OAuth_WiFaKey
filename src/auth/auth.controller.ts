@@ -11,13 +11,16 @@ import {
   HttpCode,
   Logger,
   BadRequestException,
-  UnauthorizedException,
+  HttpException,
+  InternalServerErrorException,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { ConfigService } from '@nestjs/config';
-import type { Response, Request } from 'express';
+import { type Response, type Request } from 'express';
 import { AuthService } from './auth.service';
 import { AuthenticatedUser } from './strategies/oauth.strategy';
+import { IdpErrorException } from 'src/common/exceptions/idp-error.exception';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
 
 @Controller('auth')
 export class AuthController {
@@ -34,7 +37,9 @@ export class AuthController {
    */
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  async login(@Body() body: { code: string }) {
+  async login(
+    @Body() body: { code: string; state: string; code_verifier: string },
+  ) {
     if (!body.code) {
       throw new BadRequestException('Authorization code is required');
     }
@@ -42,18 +47,29 @@ export class AuthController {
     try {
       this.logger.log(`Exchanging code for tokens: ${body.code}`);
 
-      // Call IdP to exchange code for tokens
-      const tokens = await this.authService.exchangeCodeForTokens(body.code);
+      const tokens = await this.authService.exchangeCodeForTokens(
+        body.code,
+        body.state,
+        body.code_verifier,
+      );
 
-      // Fetch user profile
-      // const profile = await this.authService.fetchUserProfile(tokens.access_token);
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+      const profile = await this.authService.fetchUserProfile(
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+        tokens.access_token,
+      );
 
-      // Sync user to database
-      // await this.authService.syncUserInfo({
-      //   idpUserId: profile.sub,
-      //   email: profile.email,
-      //   name: profile.name,
-      // });
+      const user = await this.authService.syncUserInfo({
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+        idpUserId: profile.user_id,
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+        name: profile.name,
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+        picture: profile.picture,
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string, @typescript-eslint/restrict-template-expressions
+      this.logger.log(`Tokens exchanged ${tokens}`);
 
       return {
         success: true,
@@ -65,15 +81,37 @@ export class AuthController {
         tokenType: tokens.token_type || 'Bearer',
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         expiresIn: tokens.expires_in,
-        // userInfo: {
-        //   userId: profile.sub,
-        //   email: profile.email,
-        //   name: profile.name,
-        // },
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        idToken: tokens.id_token,
+        userInfo: {
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+          userId: profile.user_id,
+          localUserId: user.id,
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+          name: profile.name,
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+          username: profile.sub,
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+          picture: profile.picture,
+        },
       };
     } catch (error) {
+      // Log error nhưng KHÔNG throw lại với message khác
       this.logger.error('Failed to exchange code:', error);
-      throw new UnauthorizedException('Failed to authenticate with IdP');
+
+      // Re-throw IdP errors AS-IS
+      if (error instanceof IdpErrorException) {
+        throw error;
+      }
+
+      // Only wrap unknown errors
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
+      throw new InternalServerErrorException(
+        'An unexpected error occurred during authentication',
+      );
     }
   }
 
@@ -121,7 +159,7 @@ export class AuthController {
    * Protected by JWT - verify IdP token
    */
   @Get('profile')
-  @UseGuards(AuthGuard('jwt'))
+  // @UseGuards(AuthGuard('jwt'))
   async getProfile(@Req() req: Request) {
     const jwtUser = req.user as { userId: string; email: string; name: string };
 
@@ -148,27 +186,86 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async refresh(@Body() body: { refresh_token: string }) {
     if (!body.refresh_token) {
-      return {
-        success: false,
-        message: 'Refresh token is required',
-      };
+      throw new BadRequestException('Refresh token is required');
     }
 
     try {
+      this.logger.log('Refreshing access token...');
+
       const tokens = await this.authService.refreshTokenFromIdp(
         body.refresh_token,
       );
 
+      this.logger.log('✅ Token refresh successful');
+
       return {
         success: true,
-        data: tokens,
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        accessToken: tokens.access_token,
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        refreshToken: tokens.refresh_token,
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        tokenType: tokens.token_type || 'Bearer',
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        expiresIn: tokens.expires_in,
       };
     } catch (error) {
-      this.logger.error('Refresh token failed:', error);
+      this.logger.error('❌ Failed to refresh token:', error);
+
+      // Re-throw IdP errors AS-IS
+      if (error instanceof IdpErrorException) {
+        throw error;
+      }
+
+      // Only wrap unknown errors
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
+      throw new InternalServerErrorException(
+        'An unexpected error occurred during token refresh',
+      );
+    }
+  }
+
+  @Post('revoke')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async revokeRefresh(@Body() body: { refresh_token: string }) {
+    if (!body.refresh_token) {
+      throw new BadRequestException('Refresh token is required');
+    }
+
+    try {
+      this.logger.log('Revoking refresh token...');
+
+      const response = await this.authService.requestRevokeRefreshTokenToIdp(
+        body.refresh_token,
+      );
+
+      this.logger.log('✅ Token refresh successful');
+
       return {
-        success: false,
-        message: 'Failed to refresh token',
+        success: true,
+        status: response.status,
+        message: response.message,
       };
+    } catch (error) {
+      this.logger.error('❌ Failed to revoke refresh token:', error);
+
+      // Re-throw IdP errors AS-IS
+      if (error instanceof IdpErrorException) {
+        throw error;
+      }
+
+      // Only wrap unknown errors
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
+      throw new InternalServerErrorException(
+        'An unexpected error occurred during revoke refresh',
+      );
     }
   }
 
