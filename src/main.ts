@@ -13,6 +13,7 @@ async function bootstrap() {
   const allowedOrigins = [
     'https://ecommerce-frontend-demo-wi-fa-key.vercel.app',
     'http://localhost:3001',
+    'http://localhost:3000',
   ];
 
   // ⭐ Dùng string thay vì function để tránh duplicate
@@ -24,7 +25,7 @@ async function bootstrap() {
       'Authorization',
       'ngrok-skip-browser-warning',
     ],
-    credentials: false,
+    credentials: true,
     preflightContinue: false,
     optionsSuccessStatus: 204,
   });

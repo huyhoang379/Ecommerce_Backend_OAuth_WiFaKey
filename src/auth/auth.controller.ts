@@ -59,13 +59,13 @@ export class AuthController {
         tokens.access_token,
       );
 
+      // Handle ApiResponse wrapper từ IdP
+      const userData = profile.data || profile;
+
       const user = await this.authService.syncUserInfo({
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-        idpUserId: profile.user_id,
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-        name: profile.name,
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-        picture: profile.picture,
+        idpUserId: userData.user_id || userData.userId,
+        name: userData.name,
+        picture: userData.picture || userData.avatar,
       });
 
       // eslint-disable-next-line @typescript-eslint/no-base-to-string, @typescript-eslint/restrict-template-expressions
@@ -74,7 +74,7 @@ export class AuthController {
       return {
         success: true,
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        accessToken: tokens.access_token,
+        accessToken: tokens.id_token, // SỬ DỤNG id_token LÀM access_token CHO FRONTEND VÌ JWT STRATEGY CẦN JWT
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         refreshToken: tokens.refresh_token,
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
@@ -85,14 +85,17 @@ export class AuthController {
         idToken: tokens.id_token,
         userInfo: {
           // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-          userId: profile.user_id,
+          userId: userData.user_id,
           localUserId: user.id,
           // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-          name: profile.name,
+          email: userData.email,
           // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-          username: profile.sub,
+          name: userData.name,
           // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-          picture: profile.picture,
+          username: userData.sub || userData.name,
+          // IdP trả về "avatar", frontend dùng "picture"
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+          picture: userData.avatar || userData.picture,
         },
       };
     } catch (error) {
@@ -201,13 +204,15 @@ export class AuthController {
       return {
         success: true,
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        accessToken: tokens.access_token,
+        accessToken: tokens.id_token || tokens.access_token, // SỬ DỤNG id_token LÀM access_token
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         refreshToken: tokens.refresh_token,
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         tokenType: tokens.token_type || 'Bearer',
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         expiresIn: tokens.expires_in,
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        idToken: tokens.id_token,
       };
     } catch (error) {
       this.logger.error('❌ Failed to refresh token:', error);

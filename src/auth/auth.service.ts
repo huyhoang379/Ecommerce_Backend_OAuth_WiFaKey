@@ -208,15 +208,16 @@ export class AuthService {
     this.logger.log('Calling IdP token endpoint for refresh...');
 
     try {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
-      const response = await fetch(oauthConfig.tokenURL, {
+      const refreshUrl = oauthConfig.tokenURL.replace('/token', '/refresh');
+      const response = await fetch(refreshUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
         },
         body: new URLSearchParams({
-          grant_type: 'refresh_token',
-          refresh_token: refreshToken,
+          grant_type: 'refresh_code',  // IdP dùng tên tùy chỉnh "refresh_code"
+          refresh_code: refreshToken,
+
           // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
           client_id: oauthConfig.clientId,
           // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
@@ -257,18 +258,23 @@ export class AuthService {
       }
 
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-      const data = await response.json();
+      const json = await response.json();
+      // IdP trả về ApiResponse wrapper: { success, message, data: { accessToken, refreshToken, ... } }
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+      const tokenData = json?.data ?? json;
       this.logger.log('Successfully refreshed tokens from IdP');
 
       return {
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-        access_token: data.access_token,
+        access_token: tokenData.access_token ?? tokenData.accessToken,
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-        refresh_token: data.refresh_token || refreshToken, // Keep old if not rotated
+        refresh_token: tokenData.refresh_token ?? tokenData.refreshToken ?? refreshToken,
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-        expires_in: data.expires_in || 3600,
+        expires_in: tokenData.expires_in ?? tokenData.expiresIn ?? 3600,
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-        token_type: data.token_type || 'Bearer',
+        token_type: tokenData.token_type ?? tokenData.tokenType ?? 'Bearer',
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+        id_token: tokenData.id_token ?? tokenData.idToken,
       };
     } catch (error) {
       // Re-throw IdP errors
@@ -331,14 +337,15 @@ export class AuthService {
         }
 
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-        const errorCode = errorData.error || 'token_exchange_failed';
+        const errorCode = errorData.error || errorData.errors || 'token_exchange_failed';
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         const errorDescription =
           // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-          errorData.error_description || 'Failed to exchange code for tokens';
+          errorData.error_description || errorData.message || 'Failed to exchange code for tokens';
 
         this.logger.error(
           `IdP token error [${response.status}]: ${errorCode} - ${errorDescription}`,
+          JSON.stringify(errorData),
         );
 
         // Throw custom exception với thông tin từ IdP
@@ -355,17 +362,20 @@ export class AuthService {
       const data = await response.json();
       this.logger.log('Successfully got tokens from IdP');
 
+      // Xử lý wrapper ApiResponse từ IdP
+      const tokenData = data.data || data;
+
       return {
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-        access_token: data.access_token,
+        access_token: tokenData.accessToken || tokenData.access_token,
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-        refresh_token: data.refresh_token,
+        refresh_token: tokenData.refreshToken || tokenData.refresh_token,
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-        expires_in: data.expires_in || 3600,
+        expires_in: tokenData.expiresIn || tokenData.expires_in || 3600,
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-        token_type: data.token_type || 'Bearer',
+        token_type: tokenData.tokenType || tokenData.token_type || 'Bearer',
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-        id_token: data.id_token,
+        id_token: tokenData.idToken || tokenData.id_token,
       };
     } catch (error) {
       // Re-throw IdP errors
@@ -411,14 +421,15 @@ export class AuthService {
         }
 
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-        const errorCode = errorData.error || 'userinfo_failed';
+        const errorCode = errorData.error || errorData.errors || 'userinfo_failed';
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         const errorDescription =
           // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-          errorData.error_description || 'Failed to fetch user profile';
+          errorData.error_description || errorData.message || 'Failed to fetch user profile';
 
         this.logger.error(
           `IdP userinfo error [${response.status}]: ${errorCode} - ${errorDescription}`,
+          JSON.stringify(errorData),
         );
 
         throw new IdpErrorException(

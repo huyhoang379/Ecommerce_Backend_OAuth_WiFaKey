@@ -56,6 +56,17 @@ export class UsersController {
           id: userInfo.id,
           idpUserId: userInfo.idpUserId,
           email: userInfo.email,
+          name: userInfo.name,
+          nickname: userInfo.nickname,
+          phone: userInfo.phone,
+          gender: userInfo.gender,
+          picture: userInfo.picture,
+          membershipLevel: userInfo.membershipLevel,
+          roles: userInfo.roles,
+          preferences: userInfo.preferences,
+          createdAt: userInfo.createdAt,
+          lastLoginAt: userInfo.lastLoginAt,
+          lastLogoutAt: userInfo.lastLogoutAt,
         },
       };
 
