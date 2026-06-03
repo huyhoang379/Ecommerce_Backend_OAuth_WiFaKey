@@ -25,6 +25,39 @@
 
 [Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
 
+## Environment Configuration
+
+Create a `.env` file in the root directory with the following configuration:
+
+```env
+# .env
+PORT=8001
+NODE_ENV=development
+# Port của frontend thay đổi tùy theo thứ tự chạy dự án (3000 hoặc 3001,...)
+FRONTEND_URL=http://localhost:3000
+
+# Database
+DB_HOST=localhost
+DB_PORT=5432
+DB_USERNAME=<tài_khoản_db_của_bạn>
+DB_PASSWORD=<mật_khẩu_db_của_bạn>
+DB_NAME=zenspace
+
+# OAuth2 IdP Configuration
+OAUTH_AUTHORIZATION_URL=http://localhost:8080/oauth2/authorize
+OAUTH_TOKEN_URL=http://localhost:8080/oauth2/token
+OAUTH_USERINFO_URL=http://localhost:8080/oauth2/userinfo
+OAUTH_REVOKE_REFRESH=http://localhost:8080/oauth2/revoke
+OAUTH_JWKS_URI=http://localhost:8080/.well-known/jwks.json
+OAUTH_ISSUER=wifakey-oauth-service
+OAUTH_LOGOUT_URL=http://localhost:8080/oauth2/logout
+
+# Client ID & Secret lấy từ việc đăng ký ứng dụng trên Auth_Service
+OAUTH_CLIENT_ID=<client_id_đăng_ký_với_auth_service>
+OAUTH_CLIENT_SECRET=<client_secret_đăng_ký_với_auth_service>
+OAUTH_CALLBACK_URL=http://localhost:3000/auth/callback
+```
+
 ## Project setup
 
 ```bash
