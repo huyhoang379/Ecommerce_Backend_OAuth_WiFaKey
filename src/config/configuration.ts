@@ -4,6 +4,7 @@ export default () => {
   const requiredOAuthConfigs = [
     'OAUTH_AUTHORIZATION_URL',
     'OAUTH_TOKEN_URL',
+    'OAUTH_REFRESH_URL',
     'OAUTH_USERINFO_URL',
     'OAUTH_JWKS_URI',
     'OAUTH_CLIENT_ID',
@@ -36,6 +37,7 @@ export default () => {
     oauth: {
       authorizationURL: process.env.OAUTH_AUTHORIZATION_URL!,
       tokenURL: process.env.OAUTH_TOKEN_URL!,
+      refreshURL: process.env.OAUTH_REFRESH_URL!,
       userInfoURL: process.env.OAUTH_USERINFO_URL!,
       revokeRefreshURL: process.env.OAUTH_REVOKE_REFRESH!,
       jwksUri: process.env.OAUTH_JWKS_URI!,

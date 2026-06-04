@@ -59,8 +59,10 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
    */
   validate(payload: JwtPayload) {
     // ✅ CRITICAL: Validate user_id (stable identifier)
-    if (!payload.user_id) {
-      throw new UnauthorizedException('Invalid token payload: missing user_id');
+    // OIDC standard uses 'sub' as the stable identifier, but fallback to 'user_id' if used
+    const idpUserId = payload.user_id || payload.sub;
+    if (!idpUserId) {
+      throw new UnauthorizedException('Invalid token payload: missing user_id and sub');
     }
 
     // Validate sub (username) - optional warning
@@ -78,7 +80,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
 
     // ✅ CRITICAL FIX: Dùng user_id làm idpUserId (stable identifier)
     return {
-      idpUserId: payload.user_id, // ✅ Stable ID từ IdP
+      idpUserId: idpUserId, // ✅ Stable ID từ IdP
       username: payload.sub, // ✅ Username (có thể thay đổi)
       email: payload.email,
       name: payload.name || payload.preferred_username,

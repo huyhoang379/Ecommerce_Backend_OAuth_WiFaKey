@@ -209,14 +209,14 @@ export class AuthService {
 
     try {
       // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
-      const response = await fetch(oauthConfig.tokenURL, {
+      const response = await fetch(oauthConfig.refreshURL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
         },
         body: new URLSearchParams({
-          grant_type: 'refresh_token',
-          refresh_token: refreshToken,
+          grant_type: 'refresh_code', // Auth Service expects grant_type=refresh_code
+          refresh_code: refreshToken, // Auth Service expects 'refresh_code'
           // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
           client_id: oauthConfig.clientId,
           // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
