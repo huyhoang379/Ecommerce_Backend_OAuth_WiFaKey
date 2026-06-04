@@ -29,7 +29,7 @@ export class AuthController {
   constructor(
     private authService: AuthService,
     private configService: ConfigService,
-  ) {}
+  ) { }
 
   /**
    * Bước 1: Redirect to IdP login page
@@ -229,7 +229,7 @@ export class AuthController {
   }
 
   @Post('revoke')
-  @UseGuards(JwtAuthGuard)
+  // @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   async revokeRefresh(@Body() body: { refresh_token: string }) {
     if (!body.refresh_token) {
